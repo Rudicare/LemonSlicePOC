@@ -1,37 +1,53 @@
-import os
 import asyncio
+import os
+import traceback
 from dotenv import load_dotenv
-from vision_agents.core import Agent, User
+from vision_agents.core import User, Agent
 from vision_agents.plugins import getstream, openai
 
 load_dotenv()
 
-async def send_test():
-    client = Agent(
-        edge=getstream.Edge(
-            api_key=os.getenv("STREAM_API_KEY"),
-            api_secret=os.getenv("STREAM_API_SECRET"),
-            provide_audio=False,
-            provide_video=False,
-            session_id="rudi-poc-test" # MUST MATCH BOT
-        ),
-        agent_user=User(name="Tester", id="test-user"),
-        llm=openai.Realtime(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o-mini")
-    )
-
+async def test_rudi():
+    session_id = "rudi-poc-session-001"
+    edge = getstream.Edge(session_id=session_id)
+    llm = openai.Realtime()
+    
+    test_user = User(id="test-human", name="Tester")
+    rudi_user = User(id="rudi", name="Rudi Bot")
+    rudi_agent = Agent(agent_user=rudi_user, edge=edge, llm=llm)
+    
     try:
-        print("🔗 Joining Rudi's room...")
-        await asyncio.sleep(2) # Give it a second to join
+        print(f"👤 Authenticating as {test_user.id}...")
+        await edge.authenticate(user=test_user)
         
-        print("✉️ Sending: 'Hello Rudi!'")
-        await client.say("Hello Rudi! Are you there?")
+        print(f"📞 Joining session: {session_id}...")
+        call = await edge.create_call(call_id=session_id)
+        await edge.join(agent=rudi_agent, call=call)
         
-        print("⏳ Waiting 5 seconds for Rudi to process...")
-        await asyncio.sleep(5) # CRITICAL: Keep connection open to receive response
-        
+        # Essential: Wait for the connection to fully open
+        await asyncio.sleep(2)
+
+        prompt = "Hello Rudi! Can you tell me a joke?"
+        print(f"✉️  Sending Prompt: '{prompt}'")
+
+        # The specific event format the Agent needs to 'hear' the message
+        await edge.send_custom_event({
+            "type": "message.new",
+            "message": {
+                "text": prompt,
+                "user": {"id": "test-human", "name": "Tester"}
+            }
+        })
+
+        print("⏳ Message sent! Check Terminal 1 for DEBUG logs...")
+        await asyncio.sleep(5)
+
+    except Exception:
+        print("❌ TESTER ERROR:")
+        traceback.print_exc()
     finally:
-        await client.close()
-        print("✅ Test finished.")
+        await edge.close()
+        print("✅ Tester session closed.")
 
 if __name__ == "__main__":
-    asyncio.run(send_test())
+    asyncio.run(test_rudi())

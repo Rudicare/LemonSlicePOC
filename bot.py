@@ -1,79 +1,74 @@
-import os
 import asyncio
+import os
+import traceback
+import warnings
 from dotenv import load_dotenv
-
-# Core imports from vision-agents
 from vision_agents.core import Agent, User
 from vision_agents.core.processors import Processor
 from vision_agents.plugins import getstream, openai
 
-# Load environment variables
 load_dotenv()
+warnings.filterwarnings("ignore", category=RuntimeWarning, module="dataclasses_json.core")
 
 class LemonSliceProcessor(Processor):
+    def __init__(self, avatar_id):
+        super().__init__()
+        self.avatar_id = avatar_id
+        self.allowed_user_id = "test-human"
+
     @property
     def name(self) -> str:
-        return "lemonslice_sync"
+        return "LemonSliceProcessor"
+
+    async def process(self, event):
+        event_type = event.get("type")
+        
+        # --- NEW DEBUG CATCH-ALL ---
+        # This will print every single event that passes through the processor
+        print(f"DEBUG: Received event type -> {event_type}")
+        
+        if event_type == "agent.response.text.done":
+            text_content = event.get("text", "")
+            print(f"🎬 [MATCH]: AI is speaking: '{text_content[:40]}...'")
+            
+            await self.edge.send_custom_event({
+                "type": "avatar.speak",
+                "avatar_id": self.avatar_id,
+                "text": text_content
+            })
 
     async def close(self):
         pass
 
-    async def __call__(self, event):
-        # 🔥 This is what we are looking for in the terminal!
-        if event.type == "agent.response.text.done":
-            print(f"\n🎬 [LemonSlice] SUCCESS! Rudi is speaking: {event.text[:60]}...")
-            # Phase 1 Integration:
-            # avatar_id = os.getenv("LEMONSLICE_AVATAR_ID")
-            # await lemonslice_sdk.animate(event.text, avatar_id=avatar_id)
-
-async def main():
-    # 1. API Key Validation
-    required_keys = ["OPENAI_API_KEY", "STREAM_API_KEY", "STREAM_API_SECRET"]
-    for key in required_keys:
-        if not os.getenv(key):
-            print(f"❌ Error: {key} is missing from your .env file.")
-            return
-
-    # 2. Initialize the Agent
-    agent = Agent(
-        edge=getstream.Edge(
-            api_key=os.getenv("STREAM_API_KEY"),
-            api_secret=os.getenv("STREAM_API_SECRET"),
-            provide_audio=False, 
-            provide_video=False,
-            session_id="rudi-poc-test" # Connects to the same room as test_rudi.py
-        ),
-        agent_user=User(name="Rudi", id="rudi-bot"),
-        instructions="You are Rudi, a helpful AI assistant. Keep responses brief.",
-        llm=openai.Realtime(
-            api_key=os.getenv("OPENAI_API_KEY"),
-            model="gpt-4o-mini"
-        ),
-        processors=[LemonSliceProcessor()]
+async def run_rudi():
+    session_id = "rudi-poc-session-001"
+    avatar_id = os.getenv("LEMONSLICE_AVATAR_ID", "agent_4626e3e8a3aa8937")
+    
+    edge = getstream.Edge(session_id=session_id)
+    llm = openai.Realtime()
+    ls_processor = LemonSliceProcessor(avatar_id=avatar_id)
+    
+    rudi_user = User(id="rudi", name="Rudi Bot")
+    rudi_agent = Agent(
+        agent_user=rudi_user, 
+        edge=edge, 
+        llm=llm,
+        processors=[ls_processor]
     )
-    
-    print("🚀 Rudi is LIVE and listening in room: rudi-poc-test")
-    
-    # 3. Execution with explicit Event Handling
+
+    print("🚀 Initializing Rudi...")
     try:
-        # We use a task to handle the safety timeout
-        timeout_task = asyncio.create_task(asyncio.sleep(900))
+        await edge.authenticate(user=rudi_user)
+        call = await edge.create_call(call_id=session_id)
+        await edge.join(agent=rudi_agent, call=call)
         
-        # This keeps the agent's internal listeners active
-        # We wait until the timeout task finishes or we hit Ctrl+C
-        await timeout_task
-        print("\n🛑 Safety Timeout Reached (15 mins).")
-            
-    except asyncio.CancelledError:
-        pass
-    except KeyboardInterrupt:
-        print("\n🛑 Manual Shutdown...")
+        print(f"✅ Rudi is LIVE in: {session_id}")
+        while True:
+            await asyncio.sleep(1)
+    except Exception:
+        traceback.print_exc()
     finally:
-        await agent.close()
-        print("✅ Session closed securely.")
+        await edge.close()
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except Exception as e:
-        print(f"⚠️ Runtime Error: {e}")
+    asyncio.run(run_rudi())
