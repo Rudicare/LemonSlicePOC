@@ -1,28 +1,29 @@
 import asyncio
-from vision_agents.plugins import getstream, openai
 from vision_agents.core import User, Agent
+from vision_agents.plugins import getstream, openai
 from dotenv import load_dotenv
+
 load_dotenv()
 
 async def run():
-    edge = getstream.Edge(session_id='lemon-test-1')
-    user = User(id='tester', name='Tester')
+    # 1. Setup with a distinct session ID
+    edge = getstream.Edge(session_id='tester-session-final')
+    user = User(id='tester', name='Tester User')
     await edge.authenticate(user=user)
     
-    # Explicitly get the same call ID
     call = await edge.create_call(call_id='lemon-test-1')
     agent = Agent(agent_user=user, edge=edge, llm=openai.Realtime())
     
-    print('Joining room as Tester...')
+    print("Tester: Joining room...")
     await edge.join(agent=agent, call=call)
     
-    # CRITICAL: Wait 5 seconds to ensure the data channel is synchronized
-    print('Waiting for connection to sync...')
-    await asyncio.sleep(5)
+    # 2. LONGER WAIT: Codespaces needs time to bridge the terminals
+    print("Waiting 15 seconds for WebRTC bridge to stabilize...")
+    await asyncio.sleep(15)
     
-    print('Firing Ping...')
-    await edge.send_custom_event({'type': 'test.ping'})
-    print('Ping Sent! Check Terminal 1.')
+    print("Sending 'ping' signal via agent.say()...")
+    await agent.say("ping")
+    print("Signal Sent! Check Terminal 1.")
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     asyncio.run(run())
